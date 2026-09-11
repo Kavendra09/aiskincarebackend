@@ -1,5 +1,5 @@
-import crypto from 'crypto';
-import { GoogleGenAI, createPartFromBase64, createPartFromText } from '@google/genai';
+﻿import crypto from 'crypto';
+import { GoogleGenAI, createPartFromUri, createPartFromBase64, createPartFromText } from '@google/genai';
 import { ENV } from '../../../config/environment';
 import { SkinAnalysis, ISkinAnalysisDocument } from '../../../models/SkinAnalysis';
 import { SkinProfile } from '../../../models/SkinProfile';
@@ -17,68 +17,61 @@ import {
   IValidatedAIOutput,
 } from './ai.types';
 
+// Images larger than this threshold use Files API instead of inline base64
+const INLINE_SIZE_THRESHOLD_BYTES = 2 * 1024 * 1024; // 2MB
+
 export class AISkinAnalysisService {
   private static geminiClient: GoogleGenAI | null = null;
 
-  /**
-   * Initializes and caches the official GoogleGenAI client
-   */
   private static getClient(): GoogleGenAI {
     if (!this.geminiClient) {
       if (!ENV.GEMINI_API_KEY && ENV.NODE_ENV !== 'test') {
-        logger.warn(
-          '[AISkinAnalysisService] GEMINI_API_KEY is not configured in environment variables'
-        );
+        logger.warn('[AISkinAnalysisService] GEMINI_API_KEY is not configured');
       }
-      this.geminiClient = new GoogleGenAI({
-        apiKey: ENV.GEMINI_API_KEY,
-        httpOptions: {
-          timeout: ENV.GEMINI_TIMEOUT_MS,
-        },
-      });
+      this.geminiClient = new GoogleGenAI({ apiKey: ENV.GEMINI_API_KEY });
     }
     return this.geminiClient;
   }
 
-  /**
-   * Generates SHA-256 hash from image buffer for deduplication and cost control
-   */
   static generateImageHash(buffer: Buffer): string {
     return crypto.createHash('sha256').update(buffer).digest('hex');
   }
 
-  /**
-   * Main entry point: Performs complete skin analysis workflow
-   */
+  private static async uploadToGeminiFilesAPI(
+    photo: IUploadedPhotoInput
+  ): Promise<{ uri: string; mimeType: string }> {
+    const client = this.getClient();
+    const sizeMB = (photo.buffer.length / (1024 * 1024)).toFixed(2);
+    logger.info(`[AISkinAnalysisService] Uploading ${photo.angle} (${sizeMB}MB) to Gemini Files API`);
+    const blob = new Blob([photo.buffer], { type: photo.mimetype });
+    const result = await client.files.upload({
+      file: blob,
+      config: { mimeType: photo.mimetype, displayName: `glowmaxx_${photo.angle}_${Date.now()}` },
+    });
+    if (!result.uri) throw new Error('Gemini Files API did not return a file URI');
+    logger.info(`[AISkinAnalysisService] Files API upload done: ${result.uri}`);
+    return { uri: result.uri, mimeType: photo.mimetype };
+  }
+
   static async analyzeSkin(dto: IStartAnalysisDTO): Promise<ISkinAnalysisDocument> {
     const startTime = Date.now();
     const { userId, photos } = dto;
 
     if (!photos || photos.length === 0) {
-      throw ApiError.imageInvalid('At least one facial photo is required for skin analysis');
+      throw ApiError.imageInvalid('At least one facial photo is required');
     }
 
-    // Front photo is primary and required
     const primaryPhoto = photos.find((p) => p.angle === 'front') || photos[0];
     const imageHash = this.generateImageHash(primaryPhoto.buffer);
 
-    // 1. Cost Control / Duplicate Cache Check
     if (ENV.AI_CACHE_DUPLICATES) {
-      const existing = await SkinAnalysis.findOne({
-        userId,
-        imageHash,
-        status: 'completed',
-      }).sort({ createdAt: -1 });
-
+      const existing = await SkinAnalysis.findOne({ userId, imageHash, status: 'completed' }).sort({ createdAt: -1 });
       if (existing) {
-        logger.info(
-          `[AISkinAnalysisService] Cache hit for user ${userId} with image hash ${imageHash.substring(0, 8)}...`
-        );
+        logger.info(`[AISkinAnalysisService] Cache hit for ${userId} hash ${imageHash.substring(0, 8)}...`);
         return existing;
       }
     }
 
-    // 2. Fetch User Profile Context (for non-overwriting context guidance)
     let profileContext: IUserProfileContext = dto.userContext || {};
     try {
       const userProfile = await SkinProfile.findOne({ userId });
@@ -91,57 +84,39 @@ export class AISkinAnalysisService {
         };
       }
     } catch (err: any) {
-      logger.warn(`[AISkinAnalysisService] Failed to load skin profile context: ${err.message}`);
+      logger.warn(`[AISkinAnalysisService] Could not load skin profile: ${err.message}`);
     }
 
-    // 3. Upload images to Cloudinary
-    const timestamp = Date.now();
-    const uploadedImages = await Promise.all(
-      photos.map(async (photo) => {
-        const result = await uploadToCloudinary(
-          photo.buffer,
-          `aiskincare/ai-analysis/${userId}`,
-          `analysis_${timestamp}_${photo.angle}`
-        );
-        return {
-          url: result.url,
-          publicId: result.publicId,
-          angle: photo.angle,
-        };
-      })
-    );
-
-    // 4. Invoke Gemini with Timeout & Retries
     const prompt = buildSkinAnalysisPrompt(profileContext);
-    const rawAiOutput = await this.callGeminiWithRetry(photos, prompt);
 
-    // 5. Server-Side Output Validation
+    // Run Cloudinary upload + Gemini analysis concurrently
+    const [uploadedImages, rawAiOutput] = await Promise.all([
+      Promise.all(
+        photos.map(async (photo) => {
+          const result = await uploadToCloudinary(
+            photo.buffer,
+            `aiskincare/ai-analysis/${userId}`,
+            `analysis_${Date.now()}_${photo.angle}`
+          );
+          return { url: result.url, publicId: result.publicId, angle: photo.angle };
+        })
+      ),
+      this.callGeminiWithRetry(photos, prompt),
+    ]);
+
     const validatedOutput = AISkinAnalysisValidator.validate(rawAiOutput);
 
-    // 6. Handle Rejection (Unsuitable Image Quality)
     if (validatedOutput.status === 'REJECTED') {
-      logger.info(
-        `[AISkinAnalysisService] Image rejected for user ${userId}: ${validatedOutput.rejectionReason}`
-      );
-
-      const rejectedRecord = await SkinAnalysis.create({
-        userId,
-        images: uploadedImages,
-        imageHash,
-        status: 'rejected',
+      logger.info(`[AISkinAnalysisService] Rejected for ${userId}: ${validatedOutput.rejectionReason}`);
+      return await SkinAnalysis.create({
+        userId, images: uploadedImages, imageHash, status: 'rejected',
         rejectionReason: validatedOutput.rejectionReason,
         rejectionMessage: validatedOutput.rejectionMessage,
-        analysisVersion: ENV.AI_ANALYSIS_VERSION,
-        promptVersion: PROMPT_VERSION,
-        model: ENV.GEMINI_MODEL,
-        processingTime: Date.now() - startTime,
-        metadata: profileContext,
+        analysisVersion: ENV.AI_ANALYSIS_VERSION, promptVersion: PROMPT_VERSION,
+        model: ENV.GEMINI_MODEL, processingTime: Date.now() - startTime, metadata: profileContext,
       });
-
-      return rejectedRecord;
     }
 
-    // 7. Deterministic Glow Score Calculation (Backend Business Logic)
     const scoreResult = SkinScoreService.calculateScore({
       observations: validatedOutput.observations,
       concerns: validatedOutput.concerns,
@@ -150,126 +125,81 @@ export class AISkinAnalysisService {
 
     const processingTime = Date.now() - startTime;
 
-    // 8. Persist Completed Analysis in MongoDB
     const analysisRecord = await SkinAnalysis.create({
-      userId,
-      images: uploadedImages,
-      imageHash,
-      status: 'completed',
-      analysisVersion: ENV.AI_ANALYSIS_VERSION,
-      promptVersion: PROMPT_VERSION,
+      userId, images: uploadedImages, imageHash, status: 'completed',
+      analysisVersion: ENV.AI_ANALYSIS_VERSION, promptVersion: PROMPT_VERSION,
       model: ENV.GEMINI_MODEL,
-      skinType: validatedOutput.skinType,
-      concerns: validatedOutput.concerns,
+      skinType: validatedOutput.skinType, concerns: validatedOutput.concerns,
       observations: validatedOutput.observations,
-      glowScore: scoreResult.glowScore,
-      potentialScore: scoreResult.potentialScore,
-      aiSummary: validatedOutput.summary,
-      processingTime,
-      metadata: profileContext,
+      glowScore: scoreResult.glowScore, potentialScore: scoreResult.potentialScore,
+      aiSummary: validatedOutput.summary, processingTime, metadata: profileContext,
     });
 
-    logger.info(
-      `[AISkinAnalysisService] Analysis completed for user ${userId} in ${processingTime}ms with Glow Score ${scoreResult.glowScore}`
-    );
-
+    logger.info(`[AISkinAnalysisService] Done for ${userId} in ${processingTime}ms — Glow: ${scoreResult.glowScore}`);
     return analysisRecord;
   }
 
-  /**
-   * Executes Gemini API call with exponential backoff and timeout enforcement
-   */
-  private static async callGeminiWithRetry(
-    photos: IUploadedPhotoInput[],
-    prompt: string
-  ): Promise<any> {
-    const maxRetries = Math.max(0, Math.min(2, ENV.GEMINI_MAX_RETRIES));
+  private static async callGeminiWithRetry(photos: IUploadedPhotoInput[], prompt: string): Promise<any> {
+    const maxRetries = Math.max(0, Math.min(1, ENV.GEMINI_MAX_RETRIES));
     let lastError: any = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 0) {
-          const delayMs = Math.pow(2, attempt - 1) * 1000;
-          logger.info(`[AISkinAnalysisService] Retry attempt ${attempt} after ${delayMs}ms...`);
-          await new Promise((resolve) => setTimeout(resolve, delayMs));
+          logger.info(`[AISkinAnalysisService] Retry attempt ${attempt}...`);
+          await new Promise((resolve) => setTimeout(resolve, 1500));
         }
-
         return await this.callGeminiSingleAttempt(photos, prompt);
       } catch (err: any) {
         lastError = err;
 
-        // If it's a timeout or abort, fail immediately - do NOT retry hanging/timed out requests
-        if (
-          (err instanceof ApiError && err.errorCode === 'AI_TIMEOUT') ||
-          err.name === 'AbortError' ||
-          err.message?.includes('aborted')
-        ) {
-          lastError = ApiError.aiTimeout(`Gemini API call timed out after ${ENV.GEMINI_TIMEOUT_MS}ms`);
+        if (err instanceof ApiError && (err.errorCode === 'AI_TIMEOUT' || err.errorCode === 'AI_RESPONSE_INVALID')) {
           break;
         }
 
-        // Check if error is client validation, auth, or model not found
         const statusCode = err?.status || err?.statusCode || 500;
-        if (statusCode === 400 || statusCode === 401 || statusCode === 403 || statusCode === 404) {
-          logger.error(`[AISkinAnalysisService] Permanent API error (${statusCode}): ${err.message}`);
-          throw ApiError.aiProviderError(`AI service error (${statusCode}): ${err.message || 'Request invalid or model not found'}`);
+        if ([400, 401, 403, 404].includes(statusCode)) {
+          logger.error(`[AISkinAnalysisService] Permanent error (${statusCode}): ${err.message}`);
+          throw ApiError.aiProviderError(`AI service error (${statusCode}): ${err.message || 'Invalid request'}`);
         }
 
-        logger.warn(
-          `[AISkinAnalysisService] Transient error on attempt ${attempt + 1}: ${err.message}`
-        );
+        logger.warn(`[AISkinAnalysisService] Transient error attempt ${attempt + 1}: ${err.message}`);
       }
     }
 
-    logger.error('[AISkinAnalysisService] All Gemini retry attempts exhausted', {
-      message: lastError?.message,
-    });
-
-    if (lastError instanceof ApiError) {
-      throw lastError;
-    }
-
-    throw ApiError.aiProviderError('AI provider is currently unavailable, please try again');
+    logger.error('[AISkinAnalysisService] All attempts exhausted', { message: lastError?.message });
+    if (lastError instanceof ApiError) throw lastError;
+    throw ApiError.aiProviderError('AI provider is unavailable, please try again');
   }
 
-  /**
-   * Single attempt execution to Google Gemini API with genuine AbortSignal cancellation
-   */
-  private static async callGeminiSingleAttempt(
-    photos: IUploadedPhotoInput[],
-    prompt: string
-  ): Promise<any> {
+  private static async callGeminiSingleAttempt(photos: IUploadedPhotoInput[], prompt: string): Promise<any> {
     const client = this.getClient();
-
-    // Prepare contents: Text instructions + image parts
-    const parts: any[] = [createPartFromText(prompt)];
-
-    for (const photo of photos) {
-      const base64Data = photo.buffer.toString('base64');
-      const sizeMB = (photo.buffer.length / (1024 * 1024)).toFixed(2);
-      logger.info(`[AISkinAnalysisService] Adding ${photo.angle} photo: ${sizeMB}MB (${photo.mimetype})`);
-
-      // Warn if image is very large — can cause slow Gemini responses
-      if (photo.buffer.length > 3 * 1024 * 1024) {
-        logger.warn(
-          `[AISkinAnalysisService] Large image detected (${sizeMB}MB). Consider compressing before upload for faster analysis.`
-        );
-      }
-
-      parts.push(createPartFromBase64(base64Data, photo.mimetype));
-    }
-
     const timeoutMs = ENV.GEMINI_TIMEOUT_MS;
     const abortController = new AbortController();
     const timer = setTimeout(() => {
-      logger.warn(`[AISkinAnalysisService] Timeout reached (${timeoutMs}ms), aborting active Gemini request.`);
+      logger.warn(`[AISkinAnalysisService] AbortSignal fired after ${timeoutMs}ms`);
       abortController.abort();
     }, timeoutMs);
 
-    logger.info(`[AISkinAnalysisService] Sending request to Gemini model ${ENV.GEMINI_MODEL} (timeout: ${timeoutMs}ms)`);
     const requestStart = Date.now();
 
     try {
+      const parts: any[] = [createPartFromText(prompt)];
+
+      for (const photo of photos) {
+        const sizeMB = (photo.buffer.length / (1024 * 1024)).toFixed(2);
+        if (photo.buffer.length > INLINE_SIZE_THRESHOLD_BYTES) {
+          logger.info(`[AISkinAnalysisService] ${photo.angle}: ${sizeMB}MB -> Files API`);
+          const { uri, mimeType } = await this.uploadToGeminiFilesAPI(photo);
+          parts.push(createPartFromUri(uri, mimeType));
+        } else {
+          logger.info(`[AISkinAnalysisService] ${photo.angle}: ${sizeMB}MB -> inline base64`);
+          parts.push(createPartFromBase64(photo.buffer.toString('base64'), photo.mimetype));
+        }
+      }
+
+      logger.info(`[AISkinAnalysisService] Calling Gemini ${ENV.GEMINI_MODEL} (timeout: ${timeoutMs}ms)`);
+
       const response = await client.models.generateContent({
         model: ENV.GEMINI_MODEL,
         contents: parts,
@@ -277,9 +207,7 @@ export class AISkinAnalysisService {
           responseMimeType: 'application/json',
           responseSchema: geminiSkinAnalysisSchema,
           abortSignal: abortController.signal,
-          httpOptions: {
-            timeout: timeoutMs,
-          },
+          httpOptions: { timeout: timeoutMs },
         },
       });
 
@@ -287,22 +215,18 @@ export class AISkinAnalysisService {
       logger.info(`[AISkinAnalysisService] Gemini responded in ${Date.now() - requestStart}ms`);
 
       const responseText = response?.text;
-      if (!responseText) {
-        throw ApiError.aiResponseInvalid('Empty response received from Gemini');
-      }
+      if (!responseText) throw ApiError.aiResponseInvalid('Empty response from Gemini');
 
       try {
         return JSON.parse(responseText);
-      } catch (parseError: any) {
-        logger.error('[AISkinAnalysisService] Failed to parse JSON from Gemini response:', {
-          text: responseText,
-        });
-        throw ApiError.aiResponseInvalid('Gemini output could not be parsed as valid JSON');
+      } catch {
+        logger.error('[AISkinAnalysisService] JSON parse failed', { preview: responseText?.substring(0, 300) });
+        throw ApiError.aiResponseInvalid('Gemini returned non-JSON output');
       }
     } catch (err: any) {
       clearTimeout(timer);
+      const elapsedMs = Date.now() - requestStart;
 
-      // Detect abort/timeout from multiple possible error shapes
       const isAborted =
         abortController.signal.aborted ||
         err.name === 'AbortError' ||
@@ -315,60 +239,39 @@ export class AISkinAnalysisService {
             err.message.toLowerCase().includes('timeout')));
 
       if (isAborted) {
-        logger.warn(
-          `[AISkinAnalysisService] Gemini timed out after ${Date.now() - requestStart}ms (limit: ${timeoutMs}ms)`
-        );
+        logger.warn(`[AISkinAnalysisService] Timed out after ${elapsedMs}ms (limit: ${timeoutMs}ms)`);
         throw ApiError.aiTimeout(
-          `AI vision analysis timed out. Please try again with a smaller or better-lit photo.`
+          `AI analysis timed out after ${Math.round(elapsedMs / 1000)}s. Please try again with a clearer photo.`
         );
       }
 
+      if (err instanceof ApiError) throw err;
       throw err;
     }
   }
 
-  /**
-   * Retrieves single analysis by ID with user ownership check
-   */
   static async getAnalysisById(userId: string, analysisId: string): Promise<ISkinAnalysisDocument> {
     const analysis = await SkinAnalysis.findById(analysisId);
-    if (!analysis) {
-      throw ApiError.analysisNotFound('Skin analysis record not found');
-    }
-
+    if (!analysis) throw ApiError.analysisNotFound('Skin analysis record not found');
     if (analysis.userId.toString() !== userId) {
-      throw ApiError.unauthorizedAnalysisAccess(
-        'You do not have permission to view this skin analysis'
-      );
+      throw ApiError.unauthorizedAnalysisAccess('You do not have permission to view this analysis');
     }
-
     return analysis;
   }
 
-  /**
-   * Retrieves user's analysis history with pagination, newest first
-   */
   static async getAnalysisHistory(userId: string, page: number = 1, limit: number = 10) {
     const pageNumber = Math.max(1, page);
     const limitNumber = Math.min(50, Math.max(1, limit));
     const skip = (pageNumber - 1) * limitNumber;
 
     const [entries, total] = await Promise.all([
-      SkinAnalysis.find({ userId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limitNumber),
+      SkinAnalysis.find({ userId }).sort({ createdAt: -1 }).skip(skip).limit(limitNumber),
       SkinAnalysis.countDocuments({ userId }),
     ]);
 
     return {
       entries,
-      pagination: {
-        page: pageNumber,
-        limit: limitNumber,
-        total,
-        totalPages: Math.ceil(total / limitNumber) || 1,
-      },
+      pagination: { page: pageNumber, limit: limitNumber, total, totalPages: Math.ceil(total / limitNumber) || 1 },
     };
   }
 }
