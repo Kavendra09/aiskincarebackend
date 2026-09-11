@@ -12,14 +12,8 @@ const app: Application = express();
 
 // Security Middlewares
 app.use(helmet());
-app.use(
-  cors({
-    origin: ENV.CLIENT_URL || '*',
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization'],
-  })
-);
+// Enable CORS for all mobile (Expo) and client requests
+app.use(cors());
 
 // Global API rate limiting
 const generalLimiter = rateLimit({

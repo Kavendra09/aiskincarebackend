@@ -3,6 +3,10 @@ import { ENV } from './environment';
 import { logger } from '../utils/logger';
 
 export const connectDB = async (uri?: string): Promise<typeof mongoose> => {
+  if (mongoose.connection.readyState >= 1) {
+    return mongoose;
+  }
+
   const connectionUri = uri || ENV.MONGO_URI;
 
   try {

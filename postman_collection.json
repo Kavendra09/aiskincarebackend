@@ -6,11 +6,6 @@
   },
   "variable": [
     {
-      "key": "baseUrl",
-      "value": "http://localhost:5000/api/v1",
-      "type": "string"
-    },
-    {
       "key": "token",
       "value": "",
       "type": "string"
@@ -37,9 +32,7 @@
       "request": {
         "method": "GET",
         "header": [],
-        "url": {
-          "raw": "http://localhost:5000/api/health"
-        }
+        "url": "http://localhost:5000/api/health"
       }
     },
     {
@@ -64,12 +57,17 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Kaven Patel\",\n  \"email\": \"kaven@example.com\",\n  \"password\": \"Password123!\",\n  \"gender\": \"male\",\n  \"age\": 22\n}"
             },
-            "url": { "raw": "{{baseUrl}}/auth/register" }
+            "url": "http://localhost:5000/api/v1/auth/register"
           }
         },
         {
@@ -91,36 +89,51 @@
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"kaven@example.com\",\n  \"password\": \"Password123!\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/auth/login" }
+            "url": "http://localhost:5000/api/v1/auth/login"
           }
         },
         {
           "name": "Refresh Token",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"refreshToken\": \"{{refreshToken}}\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/auth/refresh" }
+            "url": "http://localhost:5000/api/v1/auth/refresh"
           }
         },
         {
           "name": "Forgot Password",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"kaven@example.com\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/auth/forgot-password" }
+            "url": "http://localhost:5000/api/v1/auth/forgot-password"
           }
         }
       ]
@@ -132,8 +145,13 @@
           "name": "Get Profile",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/users/profile" }
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "http://localhost:5000/api/v1/users/profile"
           }
         },
         {
@@ -141,14 +159,20 @@
           "request": {
             "method": "PUT",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Kaven Patel\",\n  \"age\": 23\n}"
             },
-            "url": { "raw": "{{baseUrl}}/users/profile" }
+            "url": "http://localhost:5000/api/v1/users/profile"
           }
         }
       ]
@@ -160,8 +184,13 @@
           "name": "Get Skin Profile",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/skin-profile" }
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "http://localhost:5000/api/v1/skin-profile"
           }
         },
         {
@@ -169,14 +198,20 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"skinType\": \"combination\",\n  \"concerns\": [\"acne\", \"large-pores\", \"dark-spots\"],\n  \"lifestyle\": {\n    \"waterIntakeLiters\": 3,\n    \"sleepHours\": 8,\n    \"sunscreenUsage\": \"always\",\n    \"smokingStatus\": \"non-smoker\",\n    \"stressLevel\": \"low\"\n  }\n}"
             },
-            "url": { "raw": "{{baseUrl}}/skin-profile" }
+            "url": "http://localhost:5000/api/v1/skin-profile"
           }
         },
         {
@@ -184,14 +219,20 @@
           "request": {
             "method": "PUT",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"skinType\": \"oily\",\n  \"concerns\": [\"acne\", \"pimples\"]\n}"
             },
-            "url": { "raw": "{{baseUrl}}/skin-profile" }
+            "url": "http://localhost:5000/api/v1/skin-profile"
           }
         }
       ]
@@ -203,8 +244,13 @@
           "name": "Get All Routines",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/routines" }
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "http://localhost:5000/api/v1/routines"
           }
         },
         {
@@ -229,22 +275,33 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Morning Glow Routine\",\n  \"type\": \"morning\",\n  \"description\": \"Everyday AM brightening and protection routine\",\n  \"steps\": [\n    { \"title\": \"Face Wash\", \"category\": \"face-wash\", \"order\": 1 },\n    { \"title\": \"Vitamin C Serum\", \"category\": \"serum\", \"order\": 2 },\n    { \"title\": \"Moisturizer\", \"category\": \"moisturizer\", \"order\": 3 },\n    { \"title\": \"Sunscreen SPF 50+\", \"category\": \"sunscreen\", \"order\": 4 }\n  ]\n}"
             },
-            "url": { "raw": "{{baseUrl}}/routines" }
+            "url": "http://localhost:5000/api/v1/routines"
           }
         },
         {
           "name": "Today Routines Status",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/routines/today" }
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "http://localhost:5000/api/v1/routines/today"
           }
         },
         {
@@ -252,22 +309,33 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
             ],
             "body": {
               "mode": "raw",
               "raw": "{\n  \"stepId\": \"{{stepId}}\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/routines/{{routineId}}/complete" }
+            "url": "http://localhost:5000/api/v1/routines/{{routineId}}/complete"
           }
         },
         {
           "name": "Routine Statistics & Streaks",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/routines/stats" }
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "http://localhost:5000/api/v1/routines/stats"
           }
         }
       ]
@@ -279,28 +347,28 @@
           "name": "Get Products (Paginated)",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{baseUrl}}/products?page=1&limit=10" }
+            "url": "http://localhost:5000/api/v1/products?page=1&limit=10"
           }
         },
         {
           "name": "Filter by Skin Type & Concern",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{baseUrl}}/products?skinType=oily&concern=acne" }
+            "url": "http://localhost:5000/api/v1/products?skinType=oily&concern=acne"
           }
         },
         {
           "name": "Search Products",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{baseUrl}}/products/search?q=CeraVe" }
+            "url": "http://localhost:5000/api/v1/products/search?q=CeraVe"
           }
         },
         {
           "name": "Filter by Category",
           "request": {
             "method": "GET",
-            "url": { "raw": "{{baseUrl}}/products/category/sunscreen" }
+            "url": "http://localhost:5000/api/v1/products/category/sunscreen"
           }
         }
       ]
@@ -312,8 +380,13 @@
           "name": "Get Aggregated Dashboard",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": { "raw": "{{baseUrl}}/dashboard" }
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "http://localhost:5000/api/v1/dashboard"
           }
         }
       ]
