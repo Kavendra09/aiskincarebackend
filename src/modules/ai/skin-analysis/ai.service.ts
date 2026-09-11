@@ -30,7 +30,12 @@ export class AISkinAnalysisService {
           '[AISkinAnalysisService] GEMINI_API_KEY is not configured in environment variables'
         );
       }
-      this.geminiClient = new GoogleGenAI({ apiKey: ENV.GEMINI_API_KEY });
+      this.geminiClient = new GoogleGenAI({
+        apiKey: ENV.GEMINI_API_KEY,
+        httpOptions: {
+          timeout: ENV.GEMINI_TIMEOUT_MS,
+        },
+      });
     }
     return this.geminiClient;
   }
@@ -193,9 +198,13 @@ export class AISkinAnalysisService {
       } catch (err: any) {
         lastError = err;
 
-        // If it's a non-retryable error, fail immediately
-        if (err instanceof ApiError && err.errorCode === 'AI_TIMEOUT') {
-          // Timeout reached, don't retry indefinitely
+        // If it's a timeout or abort, fail immediately - do NOT retry hanging/timed out requests
+        if (
+          (err instanceof ApiError && err.errorCode === 'AI_TIMEOUT') ||
+          err.name === 'AbortError' ||
+          err.message?.includes('aborted')
+        ) {
+          lastError = ApiError.aiTimeout(`Gemini API call timed out after ${ENV.GEMINI_TIMEOUT_MS}ms`);
           break;
         }
 
@@ -224,7 +233,7 @@ export class AISkinAnalysisService {
   }
 
   /**
-   * Single attempt execution to Google Gemini API wrapped with timeout
+   * Single attempt execution to Google Gemini API with genuine AbortSignal cancellation
    */
   private static async callGeminiSingleAttempt(
     photos: IUploadedPhotoInput[],
@@ -241,27 +250,27 @@ export class AISkinAnalysisService {
     }
 
     const timeoutMs = ENV.GEMINI_TIMEOUT_MS;
-
-    // Timeout promise
-    let timer: NodeJS.Timeout;
-    const timeoutPromise = new Promise((_, reject) => {
-      timer = setTimeout(() => {
-        reject(ApiError.aiTimeout(`Gemini API call timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-    });
+    const abortController = new AbortController();
+    const timer = setTimeout(() => {
+      logger.warn(`[AISkinAnalysisService] Timeout reached (${timeoutMs}ms), aborting active Gemini request.`);
+      abortController.abort();
+    }, timeoutMs);
 
     try {
-      const apiCallPromise = client.models.generateContent({
+      const response = await client.models.generateContent({
         model: ENV.GEMINI_MODEL,
         contents: parts,
         config: {
           responseMimeType: 'application/json',
           responseSchema: geminiSkinAnalysisSchema,
+          abortSignal: abortController.signal,
+          httpOptions: {
+            timeout: timeoutMs,
+          },
         },
       });
 
-      const response: any = await Promise.race([apiCallPromise, timeoutPromise]);
-      clearTimeout(timer!);
+      clearTimeout(timer);
 
       const responseText = response?.text;
       if (!responseText) {
@@ -277,7 +286,17 @@ export class AISkinAnalysisService {
         throw ApiError.aiResponseInvalid('Gemini output could not be parsed as valid JSON');
       }
     } catch (err: any) {
-      clearTimeout(timer!);
+      clearTimeout(timer);
+
+      if (
+        abortController.signal.aborted ||
+        err.name === 'AbortError' ||
+        err.message?.includes('aborted') ||
+        err.message?.includes('timeout')
+      ) {
+        throw ApiError.aiTimeout(`Gemini API call timed out after ${timeoutMs}ms`);
+      }
+
       throw err;
     }
   }

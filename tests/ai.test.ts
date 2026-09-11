@@ -350,7 +350,7 @@ async function runTests() {
     assert(analysisRes.data.success === true, 'Response reports success: true');
     assert(Boolean(analysisRes.data.data._id), 'Returns analysis record ID');
     assert(analysisRes.data.data.status === 'completed', 'Analysis status is "completed"');
-    assert(analysisRes.data.data.model === 'gemini-2.5-flash', 'Model is recorded');
+    assert(analysisRes.data.data.model === (process.env.GEMINI_MODEL || 'gemini-3.6-flash'), 'Model is recorded');
     assert(analysisRes.data.data.analysisVersion === '1.0', 'Analysis version is 1.0');
     assert(analysisRes.data.data.promptVersion === '1.0', 'Prompt version is 1.0');
     assert(analysisRes.data.data.skinType.value === 'combination', 'Skin type recorded accurately');
