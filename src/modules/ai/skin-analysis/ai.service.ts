@@ -1,4 +1,4 @@
-﻿import crypto from 'crypto';
+import crypto from 'crypto';
 import { GoogleGenAI, createPartFromUri, createPartFromBase64, createPartFromText } from '@google/genai';
 import { ENV } from '../../../config/environment';
 import { SkinAnalysis, ISkinAnalysisDocument } from '../../../models/SkinAnalysis';
@@ -17,8 +17,8 @@ import {
   IValidatedAIOutput,
 } from './ai.types';
 
-// Images larger than this threshold use Files API instead of inline base64
-const INLINE_SIZE_THRESHOLD_BYTES = 2 * 1024 * 1024; // 2MB
+// Images up to 10MB use fast inline base64 directly (eliminates Files API network hop)
+const INLINE_SIZE_THRESHOLD_BYTES = 10 * 1024 * 1024; // 10MB
 
 export class AISkinAnalysisService {
   private static geminiClient: GoogleGenAI | null = null;
