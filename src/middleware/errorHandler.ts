@@ -65,7 +65,7 @@ export const errorHandler = (
 
   // Handle Custom Operational ApiError
   if (err instanceof ApiError) {
-    return ApiResponse.error(res, err.message, err.errors, err.statusCode);
+    return ApiResponse.error(res, err.message, err.errors, err.statusCode, err.errorCode);
   }
 
   // Generic internal server error

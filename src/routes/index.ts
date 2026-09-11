@@ -7,6 +7,7 @@ import routineRoutes from './routine.routes';
 import productRoutes from './product.routes';
 import notificationRoutes from './notification.routes';
 import dashboardRoutes from './dashboard.routes';
+import aiSkinAnalysisRoutes from '../modules/ai/skin-analysis/ai.routes';
 
 const router = Router();
 
@@ -19,5 +20,7 @@ router.use('/routines', routineRoutes);
 router.use('/products', productRoutes);
 router.use('/notifications', notificationRoutes);
 router.use('/dashboard', dashboardRoutes);
+router.use('/ai', aiSkinAnalysisRoutes);
+router.use('/ai/skin-analysis', aiSkinAnalysisRoutes);
 
 export default router;

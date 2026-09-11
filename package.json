@@ -8,7 +8,8 @@
     "start": "node dist/server.js",
     "dev": "tsx watch src/server.ts",
     "seed": "tsx src/seeds/productSeed.ts",
-    "test": "tsx tests/api.test.ts"
+    "test": "tsx tests/api.test.ts && tsx tests/ai.test.ts",
+    "test:ai": "tsx tests/ai.test.ts"
   },
   "keywords": [
     "skincare",
@@ -21,6 +22,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@google/genai": "^2.22.0",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^2.11.0",
     "cors": "^2.8.6",

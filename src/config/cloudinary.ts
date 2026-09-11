@@ -23,8 +23,10 @@ export const uploadToCloudinary = async (
   folder: string = 'aiskincare/general',
   filename?: string
 ): Promise<ICloudinaryUploadResult> => {
-  // If Cloudinary is not configured, gracefully fallback to mock URL for local/test environments
+  // If Cloudinary is not configured or in test environment, gracefully fallback to mock URL
   if (
+    process.env.NODE_ENV === 'test' ||
+    ENV.NODE_ENV === 'test' ||
     !ENV.CLOUDINARY_CLOUD_NAME ||
     ENV.CLOUDINARY_CLOUD_NAME === 'mock_cloud' ||
     !ENV.CLOUDINARY_API_KEY ||
@@ -67,6 +69,8 @@ export const uploadToCloudinary = async (
 
 export const deleteFromCloudinary = async (publicId: string): Promise<boolean> => {
   if (
+    process.env.NODE_ENV === 'test' ||
+    ENV.NODE_ENV === 'test' ||
     !ENV.CLOUDINARY_CLOUD_NAME ||
     ENV.CLOUDINARY_CLOUD_NAME === 'mock_cloud' ||
     !ENV.CLOUDINARY_API_KEY

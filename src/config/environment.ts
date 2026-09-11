@@ -19,4 +19,17 @@ export const ENV = {
 
   RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
   RATE_LIMIT_MAX: parseInt(process.env.RATE_LIMIT_MAX || '200', 10),
+
+  // Google Gemini AI Configuration
+  GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
+  GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  GEMINI_TIMEOUT_MS: parseInt(process.env.GEMINI_TIMEOUT_MS || '30000', 10),
+  GEMINI_MAX_RETRIES: parseInt(process.env.GEMINI_MAX_RETRIES || '2', 10),
+
+  // AI Module Rate Limiting & Optimization
+  AI_RATE_LIMIT_WINDOW_MS: parseInt(process.env.AI_RATE_LIMIT_WINDOW_MS || '900000', 10),
+  AI_RATE_LIMIT_MAX: parseInt(process.env.AI_RATE_LIMIT_MAX || '10', 10),
+  AI_ANALYSIS_VERSION: process.env.AI_ANALYSIS_VERSION || '1.0',
+  AI_PROMPT_VERSION: process.env.AI_PROMPT_VERSION || '1.0',
+  AI_CACHE_DUPLICATES: process.env.AI_CACHE_DUPLICATES === 'true',
 };

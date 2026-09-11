@@ -32,12 +32,19 @@ export class ApiResponse {
     res: Response,
     message: string = 'An error occurred',
     errors: any[] = [],
-    statusCode: number = 500
+    statusCode: number = 500,
+    code?: string
   ): Response {
-    return res.status(statusCode).json({
+    const payload: Record<string, any> = {
       success: false,
       message,
       errors,
-    });
+    };
+
+    if (code) {
+      payload.code = code;
+    }
+
+    return res.status(statusCode).json(payload);
   }
 }

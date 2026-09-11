@@ -533,11 +533,195 @@ The future AI service can directly consume:
 
 ---
 
+---
+
+## 🤖 Google Gemini AI Skin Analysis (GlowMaxx Vision AI)
+
+GlowMaxx features an advanced, privacy-conscious **AI Skin Analysis system** powered by the official **Google Gemini API** (`@google/genai`). It converts facial selfies into structured, non-medical skin observations and computes a deterministic Glow Score.
+
+### 🌟 Key AI Capabilities
+1. **Facial Image Validation & Quality Gate**: Assesses lighting, focus/blur, angle, obstructions (masks/sunglasses/hair), and filters before running deep analysis. Unusable photos receive controlled rejection responses without hallucinating results.
+2. **Controlled Visual Metrics**: Visual-only estimation of skin type (`oily`, `dry`, `combination`, `normal`, `sensitive`, `uncertain`), controlled skin concerns (`acne`, `pimples`, `dark_spots`, `pigmentation`, `redness`, `dryness`, `large_pores`, `blackheads`, `whiteheads`, `dull_skin`, `uneven_skin_tone`, `wrinkles`, `fine_lines`, `dark_circles`, `sun_tan`), and normalized intensity scores (0–100 or null).
+3. **Deterministic Backend Glow Score**: Gemini **never** calculates the final user score. Our backend `SkinScoreService` calculates the final Glow Score and Potential Score using a transparent, deterministic mathematical formula.
+4. **Cost & Duplicate Protection**: Calculates SHA-256 hash of submitted images. Duplicate submissions return cached analyses to avoid unnecessary Gemini API expenses.
+5. **AI Rate Limiting**: User-keyed rate limiting protects against API quota exhaustion and abuse.
+6. **Safety & Non-Medical Boundary**: Strictly cosmetic wellness assessment. Never claims to diagnose diseases (acne disease, rosacea, melasma, eczema, skin cancer).
+
+---
+
+### ⚙️ Environment Variables Setup
+
+Configure the following variables in your `.env` file:
+
+```env
+# Google Gemini API
+GEMINI_API_KEY=your_gemini_api_key_here
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_TIMEOUT_MS=30000
+GEMINI_MAX_RETRIES=2
+
+# AI Optimization & Protection
+AI_RATE_LIMIT_WINDOW_MS=900000
+AI_RATE_LIMIT_MAX=10
+AI_ANALYSIS_VERSION=1.0
+AI_PROMPT_VERSION=1.0
+AI_CACHE_DUPLICATES=true
+```
+
+> [!NOTE]
+> **How to Change the Gemini Model**: Update `GEMINI_MODEL` in `.env` (e.g. `gemini-2.5-flash`, `gemini-1.5-flash`, `gemini-2.0-flash`). No application code changes are needed!
+>
+> **How to Update the Prompt Version**: The prompt is version-controlled in `src/modules/ai/skin-analysis/ai.prompt.ts` (`PROMPT_VERSION = "1.0"`). When modifying the prompt guidelines, update `PROMPT_VERSION` and `AI_PROMPT_VERSION` so historical analyses preserve their exact lineage.
+
+---
+
+### 📐 Deterministic Glow Score Formula
+
+The Glow Score (0–100) is calculated in `src/modules/skinScore/skinScore.service.ts`:
+
+$$\text{Glow Score} = \text{clamp}_{20}^{98}\left(100 - (\text{Observation Deductions} + \text{Effective Concern Deductions})\right)$$
+
+1. **Observation Deductions** (Max ~41 pts):
+   - Redness: $(\text{redness} / 100) \times 8.0$
+   - Dryness: $(\text{dryness} / 100) \times 6.0$
+   - Visible Pores: $(\text{visiblePores} / 100) \times 6.0$
+   - Texture: $(\text{texture} / 100) \times 6.0$
+   - Uneven Tone: $(\text{unevenTone} / 100) \times 6.0$
+   - Dark Circles: $(\text{darkCircles} / 100) \times 4.0$
+   - Sebum Balance: Excess oiliness above 55 or deficit below 20 incurs up to $5.0$ pts.
+   - Any unobservable metric (`null`) receives $0$ penalty.
+2. **Concern Deductions with Diminishing Returns** (Max ~38 pts):
+   - Raw deduction = $\sum (\text{SeverityFactor} \times \text{ConcernWeight} \times \text{Confidence})$
+   - Effective deduction = $40 \times (1 - e^{-\text{RawDeduction} / 25})$
+3. **Score Range**: Clamped strictly between **20** (floor) and **98** (ceiling).
+4. **Potential Score**: Realistic achievable score through targeted daily routine, calculated from addressable factors like surface dehydration and sebum balancing.
+
+---
+
+### 📡 AI Skin Analysis API Endpoints
+
+All endpoints require JWT Bearer authentication (`Authorization: Bearer <accessToken>`).
+
+#### 1. Analyze Facial Photos
+- **Endpoint**: `POST /api/v1/ai/skin-analysis`
+- **Content-Type**: `multipart/form-data`
+- **Fields**:
+  - `front`: Facial photo file (**required**; JPEG, JPG, PNG, WEBP, max 5MB)
+  - `left`: Left angle photo file (*optional*)
+  - `right`: Right angle photo file (*optional*)
+
+**Example cURL Request**:
+```bash
+curl -X POST http://localhost:5000/api/v1/ai/skin-analysis \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -F "front=@/path/to/selfie_front.jpg" \
+  -F "left=@/path/to/selfie_left.jpg"
+```
+
+**Example Successful Response (201 Created)**:
+```json
+{
+  "success": true,
+  "message": "Skin analysis completed successfully",
+  "data": {
+    "_id": "6aa3b0198ed09f0151447dd0",
+    "userId": "6aa3b0198ed09f0151447dce",
+    "images": [
+      {
+        "url": "https://res.cloudinary.com/demo/image/upload/v1/aiskincare/ai-analysis/analysis_front.webp",
+        "publicId": "aiskincare/ai-analysis/analysis_front",
+        "angle": "front"
+      }
+    ],
+    "status": "completed",
+    "analysisVersion": "1.0",
+    "promptVersion": "1.0",
+    "model": "gemini-2.5-flash",
+    "skinType": {
+      "value": "combination",
+      "confidence": 0.84
+    },
+    "concerns": [
+      {
+        "type": "acne",
+        "severity": "mild",
+        "confidence": 0.81
+      },
+      {
+        "type": "redness",
+        "severity": "mild",
+        "confidence": 0.72
+      }
+    ],
+    "observations": {
+      "oiliness": 58,
+      "dryness": 25,
+      "redness": 30,
+      "visiblePores": 40,
+      "unevenTone": 35,
+      "texture": 30,
+      "darkCircles": 25
+    },
+    "glowScore": 83,
+    "potentialScore": 91,
+    "aiSummary": "Visible signs of combination skin with mild active breakouts on the T-zone.",
+    "processingTime": 1420,
+    "createdAt": "2026-09-11T13:00:00.000Z"
+  }
+}
+```
+
+**Example Rejection Response (422 Unprocessable Entity)**:
+```json
+{
+  "success": false,
+  "code": "IMAGE_QUALITY_INSUFFICIENT",
+  "message": "Please upload a clear, well-lit facial photo.",
+  "data": {
+    "_id": "6aa3b0198ed09f0151447dd1",
+    "status": "rejected",
+    "rejectionReason": "IMAGE_QUALITY_INSUFFICIENT",
+    "rejectionMessage": "Please upload a clear, well-lit facial photo."
+  }
+}
+```
+
+---
+
+#### 2. Get Analysis by ID
+- **Endpoint**: `GET /api/v1/ai/skin-analysis/:id`
+- **Access**: Private (Owner only; returns `403 UNAUTHORIZED_ANALYSIS_ACCESS` if attempted by another user).
+
+---
+
+#### 3. Get Analysis History
+- **Endpoint**: `GET /api/v1/ai/skin-analysis?page=1&limit=10`
+- **Access**: Private (Current user's history, sorted newest first).
+
+---
+
+### 🚨 Error Codes Reference
+
+| Error Code | HTTP Status | Description |
+|---|---|---|
+| `IMAGE_INVALID` | 400 | Missing required front photo or invalid MIME type/size |
+| `IMAGE_QUALITY_INSUFFICIENT` | 422 | Photo is blurry, too dark/bright, obstructed by masks/sunglasses |
+| `AI_PROVIDER_ERROR` | 502 | Upstream Gemini API temporary failure after all retries |
+| `AI_TIMEOUT` | 504 | Gemini API call exceeded `GEMINI_TIMEOUT_MS` threshold |
+| `AI_RATE_LIMITED` | 429 | User exceeded allowed analyses in `AI_RATE_LIMIT_WINDOW_MS` |
+| `AI_RESPONSE_INVALID` | 502 | Gemini output failed server-side schema or business validation |
+| `ANALYSIS_NOT_FOUND` | 404 | No skin analysis document matches the provided MongoDB ID |
+| `UNAUTHORIZED_ANALYSIS_ACCESS` | 403 | User attempted to view another user's skin analysis |
+
+---
+
 ## 🛡️ Security & Best Practices
 
 - **Zero Plaintext Passwords**: Automatic 10-round Bcrypt salting on pre-save.
 - **Hidden Credentials**: Password hash and refresh tokens have `select: false` on Mongoose schema and are deleted during `toJSON` transforms.
-- **Brute Force Defense**: `express-rate-limit` throttles auth endpoints to 30 requests / 15 minutes.
+- **Gemini Key Confidentiality**: The `GEMINI_API_KEY` exists exclusively in the backend `.env`. It is never returned in API payloads, never sent to React Native, and never logged.
+- **No PII/Image Data Leakage in Logs**: Error logs record request ID, user ID, latency, and status code, but never raw photo buffers or API keys.
+- **Brute Force Defense**: `express-rate-limit` throttles auth endpoints to 30 requests / 15 minutes, and AI skin analysis endpoints to 10 requests / 15 minutes.
 - **HTTP Hardening**: `helmet` sets secure HTTP response headers (HSTS, X-Content-Type-Options, DNS prefetch control, etc.).
 - **Data Isolation**: All user-specific operations verify document ownership (`userId === req.user._id`), returning 403 Forbidden for unauthorized access.
 - **Safe Error Handling**: Internal server errors do not expose stack traces in production mode.
