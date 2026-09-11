@@ -33,13 +33,14 @@ export class AISkinAnalysisController {
     const files = req.files as { [fieldname: string]: Express.Multer.File[] } | undefined;
     const singleFile = req.file;
 
-    const frontFile = files?.['front']?.[0] || singleFile;
+    // Support 'front', 'image' (single-photo upload from mobile), or fallback to req.file
+    const frontFile = files?.['front']?.[0] || files?.['image']?.[0] || singleFile;
     const leftFile = files?.['left']?.[0];
     const rightFile = files?.['right']?.[0];
 
     if (!frontFile) {
       throw ApiError.imageInvalid(
-        'Front facial photo is required for skin analysis'
+        'Please upload a facial photo using the "front" or "image" field'
       );
     }
 

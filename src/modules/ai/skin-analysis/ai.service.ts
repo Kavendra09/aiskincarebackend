@@ -246,6 +246,16 @@ export class AISkinAnalysisService {
 
     for (const photo of photos) {
       const base64Data = photo.buffer.toString('base64');
+      const sizeMB = (photo.buffer.length / (1024 * 1024)).toFixed(2);
+      logger.info(`[AISkinAnalysisService] Adding ${photo.angle} photo: ${sizeMB}MB (${photo.mimetype})`);
+
+      // Warn if image is very large — can cause slow Gemini responses
+      if (photo.buffer.length > 3 * 1024 * 1024) {
+        logger.warn(
+          `[AISkinAnalysisService] Large image detected (${sizeMB}MB). Consider compressing before upload for faster analysis.`
+        );
+      }
+
       parts.push(createPartFromBase64(base64Data, photo.mimetype));
     }
 
@@ -255,6 +265,9 @@ export class AISkinAnalysisService {
       logger.warn(`[AISkinAnalysisService] Timeout reached (${timeoutMs}ms), aborting active Gemini request.`);
       abortController.abort();
     }, timeoutMs);
+
+    logger.info(`[AISkinAnalysisService] Sending request to Gemini model ${ENV.GEMINI_MODEL} (timeout: ${timeoutMs}ms)`);
+    const requestStart = Date.now();
 
     try {
       const response = await client.models.generateContent({
@@ -271,6 +284,7 @@ export class AISkinAnalysisService {
       });
 
       clearTimeout(timer);
+      logger.info(`[AISkinAnalysisService] Gemini responded in ${Date.now() - requestStart}ms`);
 
       const responseText = response?.text;
       if (!responseText) {
@@ -288,13 +302,25 @@ export class AISkinAnalysisService {
     } catch (err: any) {
       clearTimeout(timer);
 
-      if (
+      // Detect abort/timeout from multiple possible error shapes
+      const isAborted =
         abortController.signal.aborted ||
         err.name === 'AbortError' ||
-        err.message?.includes('aborted') ||
-        err.message?.includes('timeout')
-      ) {
-        throw ApiError.aiTimeout(`Gemini API call timed out after ${timeoutMs}ms`);
+        err.name === 'TimeoutError' ||
+        err.code === 'ECONNABORTED' ||
+        err.code === 'ETIMEDOUT' ||
+        (typeof err.message === 'string' &&
+          (err.message.toLowerCase().includes('aborted') ||
+            err.message.toLowerCase().includes('timed out') ||
+            err.message.toLowerCase().includes('timeout')));
+
+      if (isAborted) {
+        logger.warn(
+          `[AISkinAnalysisService] Gemini timed out after ${Date.now() - requestStart}ms (limit: ${timeoutMs}ms)`
+        );
+        throw ApiError.aiTimeout(
+          `AI vision analysis timed out. Please try again with a smaller or better-lit photo.`
+        );
       }
 
       throw err;
