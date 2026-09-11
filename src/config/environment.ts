@@ -22,8 +22,8 @@ export const ENV = {
 
   // Google Gemini AI Configuration
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
-  GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
-  GEMINI_TIMEOUT_MS: parseInt(process.env.GEMINI_TIMEOUT_MS || '30000', 10),
+  GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
+  GEMINI_TIMEOUT_MS: parseInt(process.env.GEMINI_TIMEOUT_MS || '60000', 10),
   GEMINI_MAX_RETRIES: parseInt(process.env.GEMINI_MAX_RETRIES || '2', 10),
 
   // AI Module Rate Limiting & Optimization

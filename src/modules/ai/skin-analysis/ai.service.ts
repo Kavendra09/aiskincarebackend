@@ -199,11 +199,11 @@ export class AISkinAnalysisService {
           break;
         }
 
-        // Check if error is client validation or permanent
+        // Check if error is client validation, auth, or model not found
         const statusCode = err?.status || err?.statusCode || 500;
-        if (statusCode === 400 || statusCode === 401 || statusCode === 403) {
+        if (statusCode === 400 || statusCode === 401 || statusCode === 403 || statusCode === 404) {
           logger.error(`[AISkinAnalysisService] Permanent API error (${statusCode}): ${err.message}`);
-          throw ApiError.aiProviderError('AI service rejected analysis request');
+          throw ApiError.aiProviderError(`AI service error (${statusCode}): ${err.message || 'Request invalid or model not found'}`);
         }
 
         logger.warn(
