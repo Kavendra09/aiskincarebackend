@@ -71,11 +71,10 @@ export class AISkinAnalysisValidator {
     let validatedSkinType: IAISkinTypeResult | undefined = undefined;
     if (raw.skinType) {
       const { value, confidence } = raw.skinType;
-      if (!AI_SKIN_TYPES.includes(value as AISkinTypeValue)) {
-        validationErrors.push(
-          `Invalid skinType value "${value}". Allowed: ${AI_SKIN_TYPES.join(', ')}`
-        );
-      }
+      const normalizedVal = typeof value === 'string' ? value.toLowerCase().trim() : '';
+      const safeValue = AI_SKIN_TYPES.includes(normalizedVal as AISkinTypeValue)
+        ? (normalizedVal as AISkinTypeValue)
+        : 'uncertain';
 
       const confNum = Number(confidence);
       if (isNaN(confNum) || confNum < 0 || confNum > 1) {
@@ -84,7 +83,7 @@ export class AISkinAnalysisValidator {
 
       if (validationErrors.length === 0) {
         validatedSkinType = {
-          value: value as AISkinTypeValue,
+          value: safeValue,
           confidence: Math.round(confNum * 100) / 100,
         };
       }
@@ -162,24 +161,40 @@ export class AISkinAnalysisValidator {
         'darkCircles',
       ];
 
+      const TEXT_SCORE_MAP: Record<string, number> = {
+        none: 0,
+        no: 0,
+        clear: 0,
+        smooth: 15,
+        even: 15,
+        low: 25,
+        slight: 25,
+        mild: 25,
+        visible: 50,
+        moderate: 50,
+        medium: 50,
+        noticeable: 55,
+        rough: 65,
+        uneven: 65,
+        enlarged: 70,
+        high: 80,
+        severe: 90,
+      };
+
       for (const key of observationKeys) {
         const val = raw.observations[key];
         if (val === null || val === undefined || val === '') {
           validatedObservations[key] = null;
-        } else if (typeof val === 'string' && ['none', 'low', 'mild', 'moderate', 'medium', 'high', 'severe'].includes(val.toLowerCase().trim())) {
-          const lower = val.toLowerCase().trim();
-          if (lower === 'none') validatedObservations[key] = 0;
-          else if (lower === 'low' || lower === 'mild') validatedObservations[key] = 30;
-          else if (lower === 'moderate' || lower === 'medium') validatedObservations[key] = 60;
-          else if (lower === 'high' || lower === 'severe') validatedObservations[key] = 85;
+        } else if (typeof val === 'string' && TEXT_SCORE_MAP[val.toLowerCase().trim()] !== undefined) {
+          validatedObservations[key] = TEXT_SCORE_MAP[val.toLowerCase().trim()];
         } else {
           const num = Number(val);
-          if (isNaN(num) || num < 0 || num > 100) {
-            validationErrors.push(
-              `Observation "${key}" must be null or an integer between 0 and 100 (received: ${val})`
-            );
-          } else {
+          if (!isNaN(num) && num >= 0 && num <= 100) {
             validatedObservations[key] = Math.round(num);
+          } else {
+            // Gracefully set to null rather than failing the whole analysis with a 502 error
+            logger.warn(`[AI Validator] Unrecognized observation value "${val}" for "${key}", defaulting to null`);
+            validatedObservations[key] = null;
           }
         }
       }
