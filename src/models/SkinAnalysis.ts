@@ -23,6 +23,7 @@ export const AI_SKIN_CONCERN_TYPES = [
   'whiteheads',
   'dull_skin',
   'uneven_skin_tone',
+  'uneven_texture',
   'wrinkles',
   'fine_lines',
   'dark_circles',
@@ -80,6 +81,13 @@ export interface IAIObservations {
   darkCircles: number | null;
 }
 
+export interface IAISkinRecommendation {
+  concern: string;
+  productType: string;
+  keyIngredient: string;
+  reason: string;
+}
+
 export interface ISkinAnalysis {
   userId: Types.ObjectId;
   images: IAnalysisImage[];
@@ -93,6 +101,7 @@ export interface ISkinAnalysis {
   skinType?: IAISkinTypeResult;
   concerns: IAISkinConcernResult[];
   observations?: IAIObservations;
+  recommendations?: IAISkinRecommendation[];
   glowScore?: number;
   potentialScore?: number | null;
   aiSummary?: string;
@@ -235,6 +244,17 @@ const skinAnalysisSchema = new Schema<ISkinAnalysisDocument>(
     observations: {
       type: observationsSchema,
       default: null,
+    },
+    recommendations: {
+      type: [
+        {
+          concern: { type: String, default: '' },
+          productType: { type: String, default: '' },
+          keyIngredient: { type: String, default: '' },
+          reason: { type: String, default: '' },
+        },
+      ],
+      default: [],
     },
     glowScore: {
       type: Number,

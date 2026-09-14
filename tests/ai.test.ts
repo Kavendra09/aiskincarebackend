@@ -164,13 +164,14 @@ async function runTests() {
     // ====================================================
     console.log('\n--- UNIT TEST 2: AI Response Schema & Business Validator ---');
 
-    // 2a. Valid AI output
+    // 2a. Valid Groq AI output (compact schema with recommendations and uneven_texture)
     const validRaw = {
-      status: 'SUCCESS',
+      analysisStatus: 'completed',
+      imageQuality: { isUsable: true, reason: null },
       skinType: { value: 'combination', confidence: 0.85 },
       concerns: [
         { type: 'acne', severity: 'mild', confidence: 0.8 },
-        { type: 'pigmentation', severity: 'moderate', confidence: 0.75 },
+        { type: 'uneven_texture', severity: 'moderate', confidence: 0.75 },
       ],
       observations: {
         oiliness: 62,
@@ -181,18 +182,24 @@ async function runTests() {
         texture: 38,
         darkCircles: 30,
       },
+      recommendations: [
+        { concern: 'acne', productType: 'spot treatment', keyIngredient: 'salicylic acid', reason: 'clears pores' },
+        { concern: 'uneven_texture', productType: 'serum', keyIngredient: 'niacinamide', reason: 'smooths texture' },
+      ],
       summary: 'Visible combination skin with mild active breakouts on the T-zone.',
     };
     const validated = AISkinAnalysisValidator.validate(validRaw);
-    assert(validated.status === 'SUCCESS', 'Validator accepts valid AI output');
+    assert(validated.status === 'SUCCESS', 'Validator accepts valid Groq AI output');
     assert(validated.skinType?.value === 'combination', 'Skin type parsed accurately');
     assert(validated.concerns.length === 2, 'Concerns parsed accurately');
+    assert(validated.concerns[1].type === 'uneven_texture', 'uneven_texture concern accepted');
     assert(validated.observations?.oiliness === 62, 'Observation scores parsed accurately');
+    assert(validated.recommendations?.length === 2, 'Recommendations parsed accurately');
 
-    // 2b. Valid REJECTED output
+    // 2b. Valid REJECTED output (using imageQuality.isUsable: false)
     const rejectedRaw = {
-      status: 'REJECTED',
-      rejectionReason: 'IMAGE_QUALITY_INSUFFICIENT',
+      analysisStatus: 'rejected',
+      imageQuality: { isUsable: false, reason: 'IMAGE_QUALITY_INSUFFICIENT' },
       rejectionMessage: 'Please upload a clear, well-lit facial photo.',
     };
     const validatedRejection = AISkinAnalysisValidator.validate(rejectedRaw);
@@ -302,15 +309,16 @@ async function runTests() {
     // ====================================================
     console.log('\n--- INTEGRATION TEST 5: Successful AI Skin Analysis ---');
 
-    // Mock AISkinAnalysisService.callGeminiSingleAttempt to avoid live API charges during tests
-    const originalCall = (AISkinAnalysisService as any).callGeminiSingleAttempt;
-    (AISkinAnalysisService as any).callGeminiSingleAttempt = async () => {
+    // Mock AISkinAnalysisService.callGroqSingleAttempt to avoid live API charges during tests
+    const originalCall = (AISkinAnalysisService as any).callGroqSingleAttempt;
+    (AISkinAnalysisService as any).callGroqSingleAttempt = async () => {
       return {
-        status: 'SUCCESS',
+        analysisStatus: 'completed',
+        imageQuality: { isUsable: true, reason: null },
         skinType: { value: 'combination', confidence: 0.84 },
         concerns: [
           { type: 'acne', severity: 'mild', confidence: 0.81 },
-          { type: 'redness', severity: 'mild', confidence: 0.72 },
+          { type: 'uneven_texture', severity: 'mild', confidence: 0.72 },
         ],
         observations: {
           oiliness: 58,
@@ -321,7 +329,21 @@ async function runTests() {
           texture: 30,
           darkCircles: 25,
         },
-        summary: 'Visible combination skin with slight redness around the cheeks.',
+        recommendations: [
+          {
+            concern: 'acne',
+            productType: 'spot treatment',
+            keyIngredient: 'salicylic acid',
+            reason: 'clears blemishes',
+          },
+          {
+            concern: 'uneven_texture',
+            productType: 'serum',
+            keyIngredient: 'niacinamide',
+            reason: 'improves texture',
+          },
+        ],
+        summary: 'Visible combination skin with slight texture around cheeks.',
       };
     };
 
@@ -350,10 +372,13 @@ async function runTests() {
     assert(analysisRes.data.success === true, 'Response reports success: true');
     assert(Boolean(analysisRes.data.data._id), 'Returns analysis record ID');
     assert(analysisRes.data.data.status === 'completed', 'Analysis status is "completed"');
-    assert(analysisRes.data.data.model === (process.env.GEMINI_MODEL || 'gemini-3.6-flash'), 'Model is recorded');
+    assert(analysisRes.data.data.model === (process.env.GROQ_MODEL || 'qwen/qwen3.8-27b'), 'Model is recorded');
     assert(analysisRes.data.data.analysisVersion === '1.0', 'Analysis version is 1.0');
-    assert(analysisRes.data.data.promptVersion === '1.0', 'Prompt version is 1.0');
+    assert(analysisRes.data.data.promptVersion === '2.0', 'Prompt version is 2.0');
     assert(analysisRes.data.data.skinType.value === 'combination', 'Skin type recorded accurately');
+    assert(Array.isArray(analysisRes.data.data.recommendations), 'Recommendations returned as array');
+    assert(analysisRes.data.data.recommendations.length === 2, 'Two recommendations stored');
+    assert(analysisRes.data.data.recommendations[0].productType === 'spot treatment', 'Product type stored');
     assert(typeof analysisRes.data.data.glowScore === 'number', 'Deterministic Glow Score computed');
     assert(analysisRes.data.data.glowScore >= 60 && analysisRes.data.data.glowScore <= 90, 'Glow score in expected range');
     assert(Boolean(analysisRes.data.data.images[0].url), 'Cloudinary URL returned');
@@ -365,10 +390,10 @@ async function runTests() {
     // ====================================================
     console.log('\n--- INTEGRATION TEST 6: Cost Control & Duplicate Image Caching ---');
 
-    let geminiCalledOnDuplicate = false;
-    (AISkinAnalysisService as any).callGeminiSingleAttempt = async () => {
-      geminiCalledOnDuplicate = true;
-      throw new Error('Gemini should NOT be called for duplicate image submission!');
+    let groqCalledOnDuplicate = false;
+    (AISkinAnalysisService as any).callGroqSingleAttempt = async () => {
+      groqCalledOnDuplicate = true;
+      throw new Error('Groq should NOT be called for duplicate image submission!');
     };
 
     const duplicateFormData = new FormData();
@@ -387,7 +412,7 @@ async function runTests() {
 
     assert(duplicateRes.status === 201 || duplicateRes.status === 200, 'Duplicate request handled successfully');
     assert(duplicateRes.data.data._id === analysisIdA, 'Duplicate image returns cached analysis ID');
-    assert(!geminiCalledOnDuplicate, 'Gemini API was NOT called for duplicate image submission');
+    assert(!groqCalledOnDuplicate, 'Groq API was NOT called for duplicate image submission');
 
     // ====================================================
     // INTEGRATION TEST SUITE 6: Authorization & Ownership
@@ -421,11 +446,11 @@ async function runTests() {
     // ====================================================
     console.log('\n--- INTEGRATION TEST 8: Image Quality Insufficient / Rejection ---');
 
-    // Mock Gemini returning REJECTED status
-    (AISkinAnalysisService as any).callGeminiSingleAttempt = async () => {
+    // Mock Groq returning REJECTED status
+    (AISkinAnalysisService as any).callGroqSingleAttempt = async () => {
       return {
-        status: 'REJECTED',
-        rejectionReason: 'IMAGE_QUALITY_INSUFFICIENT',
+        analysisStatus: 'rejected',
+        imageQuality: { isUsable: false, reason: 'IMAGE_QUALITY_INSUFFICIENT' },
         rejectionMessage: 'Please upload a clear, well-lit facial photo.',
       };
     };
@@ -473,7 +498,7 @@ async function runTests() {
     console.log('\n--- INTEGRATION TEST 10: Retry Behavior on Transient Error ---');
 
     let attemptCount = 0;
-    (AISkinAnalysisService as any).callGeminiSingleAttempt = async () => {
+    (AISkinAnalysisService as any).callGroqSingleAttempt = async () => {
       attemptCount++;
       if (attemptCount === 1) {
         // Simulate temporary 503 error on first try
@@ -482,10 +507,12 @@ async function runTests() {
         throw err;
       }
       return {
-        status: 'SUCCESS',
+        analysisStatus: 'completed',
+        imageQuality: { isUsable: true, reason: null },
         skinType: { value: 'oily', confidence: 0.9 },
         concerns: [{ type: 'acne', severity: 'mild', confidence: 0.8 }],
         observations: { oiliness: 75, dryness: 10, redness: 20, visiblePores: 60, unevenTone: 20, texture: 30, darkCircles: 10 },
+        recommendations: [{ concern: 'acne', productType: 'cleanser', keyIngredient: 'salicylic acid', reason: 'reduces oil' }],
         summary: 'Oily skin with high sebum production on forehead.',
       };
     };
@@ -513,7 +540,7 @@ async function runTests() {
     assert(attemptCount === 2, 'Attempted exactly 2 times (1 retry occurred)');
 
     // Restore original method
-    (AISkinAnalysisService as any).callGeminiSingleAttempt = originalCall;
+    (AISkinAnalysisService as any).callGroqSingleAttempt = originalCall;
 
     console.log('\n🎉 ALL AI SKIN ANALYSIS TESTS PASSED SUCCESSFULLY! 🎉\n');
   } finally {

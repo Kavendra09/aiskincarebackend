@@ -5,6 +5,7 @@ import {
   IAIObservations,
   IAISkinTypeResult,
   IAISkinConcernResult,
+  IAISkinRecommendation,
   ImageAngle,
 } from '../../../models/SkinAnalysis';
 
@@ -35,9 +36,10 @@ export interface IStartAnalysisDTO {
   userContext?: IUserProfileContext;
 }
 
-export type GeminiAnalysisStatus = 'SUCCESS' | 'REJECTED';
+export type AIAnalysisStatus = 'SUCCESS' | 'REJECTED';
+export type GeminiAnalysisStatus = AIAnalysisStatus;
 
-export type GeminiRejectionReason =
+export type AIRejectionReason =
   | 'IMAGE_QUALITY_INSUFFICIENT'
   | 'NO_FACE_DETECTED'
   | 'MULTIPLE_FACES'
@@ -46,11 +48,15 @@ export type GeminiRejectionReason =
   | 'EXTREME_LIGHTING'
   | 'EXTREME_ANGLE';
 
-export interface IRawGeminiResponse {
-  status: GeminiAnalysisStatus;
-  rejectionReason?: GeminiRejectionReason | string;
+export interface IRawGroqResponse {
+  analysisStatus?: 'completed' | 'rejected' | string;
+  status?: AIAnalysisStatus | string;
+  imageQuality?: {
+    isUsable: boolean;
+    reason: string | null;
+  };
+  rejectionReason?: AIRejectionReason | string;
   rejectionMessage?: string;
-  analysisVersion?: string;
   skinType?: {
     value: AISkinTypeValue;
     confidence: number;
@@ -61,24 +67,33 @@ export interface IRawGeminiResponse {
     confidence: number;
   }>;
   observations?: {
-    oiliness: number | null;
-    dryness: number | null;
-    redness: number | null;
-    visiblePores: number | null;
-    unevenTone: number | null;
-    texture: number | null;
-    darkCircles: number | null;
+    oiliness: number | string | null;
+    dryness: number | string | null;
+    redness: number | string | null;
+    visiblePores: number | string | null;
+    texture: number | string | null;
+    unevenTone: number | string | null;
+    darkCircles: number | string | null;
   };
+  recommendations?: Array<{
+    concern: string;
+    productType: string;
+    keyIngredient: string;
+    reason: string;
+  }>;
   summary?: string;
 }
 
+export type IRawGeminiResponse = IRawGroqResponse;
+
 export interface IValidatedAIOutput {
-  status: GeminiAnalysisStatus;
+  status: AIAnalysisStatus;
   rejectionReason?: string;
   rejectionMessage?: string;
   analysisVersion: string;
   skinType?: IAISkinTypeResult;
   concerns: IAISkinConcernResult[];
   observations?: IAIObservations;
+  recommendations?: IAISkinRecommendation[];
   summary?: string;
 }

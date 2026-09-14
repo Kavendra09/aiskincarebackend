@@ -20,7 +20,13 @@ export const ENV = {
   RATE_LIMIT_WINDOW_MS: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
   RATE_LIMIT_MAX: parseInt(process.env.RATE_LIMIT_MAX || '200', 10),
 
-  // Google Gemini AI Configuration
+  // Groq AI Configuration
+  GROQ_API_KEY: process.env.GROQ_API_KEY || '',
+  GROQ_MODEL: process.env.GROQ_MODEL || 'qwen/qwen3.8-27b',
+  GROQ_TIMEOUT_MS: parseInt(process.env.GROQ_TIMEOUT_MS || '50000', 10),
+  GROQ_MAX_RETRIES: parseInt(process.env.GROQ_MAX_RETRIES || '2', 10),
+
+  // Google Gemini AI Configuration (Legacy fallback)
   GEMINI_API_KEY: process.env.GEMINI_API_KEY || '',
   GEMINI_MODEL: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
   GEMINI_TIMEOUT_MS: parseInt(process.env.GEMINI_TIMEOUT_MS || '50000', 10),

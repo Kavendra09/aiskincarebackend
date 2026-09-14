@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import { GoogleGenAI, createPartFromUri, createPartFromBase64, createPartFromText } from '@google/genai';
+import Groq from 'groq-sdk';
 import { ENV } from '../../../config/environment';
 import { SkinAnalysis, ISkinAnalysisDocument } from '../../../models/SkinAnalysis';
 import { SkinProfile } from '../../../models/SkinProfile';
@@ -7,50 +7,29 @@ import { uploadToCloudinary } from '../../../config/cloudinary';
 import { ApiError } from '../../../utils/apiError';
 import { logger } from '../../../utils/logger';
 import { buildSkinAnalysisPrompt, PROMPT_VERSION } from './ai.prompt';
-import { geminiSkinAnalysisSchema } from './ai.schema';
 import { AISkinAnalysisValidator } from './ai.validator';
 import { SkinScoreService } from '../../skinScore/skinScore.service';
 import {
   IStartAnalysisDTO,
   IUploadedPhotoInput,
   IUserProfileContext,
-  IValidatedAIOutput,
 } from './ai.types';
 
-// Images up to 10MB use fast inline base64 directly (eliminates Files API network hop)
-const INLINE_SIZE_THRESHOLD_BYTES = 10 * 1024 * 1024; // 10MB
-
 export class AISkinAnalysisService {
-  private static geminiClient: GoogleGenAI | null = null;
+  private static groqClient: Groq | null = null;
 
-  private static getClient(): GoogleGenAI {
-    if (!this.geminiClient) {
-      if (!ENV.GEMINI_API_KEY && ENV.NODE_ENV !== 'test') {
-        logger.warn('[AISkinAnalysisService] GEMINI_API_KEY is not configured');
+  private static getClient(): Groq {
+    if (!this.groqClient) {
+      if (!ENV.GROQ_API_KEY && ENV.NODE_ENV !== 'test') {
+        logger.warn('[AISkinAnalysisService] GROQ_API_KEY is not configured');
       }
-      this.geminiClient = new GoogleGenAI({ apiKey: ENV.GEMINI_API_KEY });
+      this.groqClient = new Groq({ apiKey: ENV.GROQ_API_KEY });
     }
-    return this.geminiClient;
+    return this.groqClient;
   }
 
   static generateImageHash(buffer: Buffer): string {
     return crypto.createHash('sha256').update(buffer).digest('hex');
-  }
-
-  private static async uploadToGeminiFilesAPI(
-    photo: IUploadedPhotoInput
-  ): Promise<{ uri: string; mimeType: string }> {
-    const client = this.getClient();
-    const sizeMB = (photo.buffer.length / (1024 * 1024)).toFixed(2);
-    logger.info(`[AISkinAnalysisService] Uploading ${photo.angle} (${sizeMB}MB) to Gemini Files API`);
-    const blob = new Blob([photo.buffer], { type: photo.mimetype });
-    const result = await client.files.upload({
-      file: blob,
-      config: { mimeType: photo.mimetype, displayName: `glowmaxx_${photo.angle}_${Date.now()}` },
-    });
-    if (!result.uri) throw new Error('Gemini Files API did not return a file URI');
-    logger.info(`[AISkinAnalysisService] Files API upload done: ${result.uri}`);
-    return { uri: result.uri, mimeType: photo.mimetype };
   }
 
   static async analyzeSkin(dto: IStartAnalysisDTO): Promise<ISkinAnalysisDocument> {
@@ -89,7 +68,7 @@ export class AISkinAnalysisService {
 
     const prompt = buildSkinAnalysisPrompt(profileContext);
 
-    // Run Cloudinary upload + Gemini analysis concurrently
+    // Run Cloudinary upload + Groq analysis concurrently
     const [uploadedImages, rawAiOutput] = await Promise.all([
       Promise.all(
         photos.map(async (photo) => {
@@ -101,7 +80,7 @@ export class AISkinAnalysisService {
           return { url: result.url, publicId: result.publicId, angle: photo.angle };
         })
       ),
-      this.callGeminiWithRetry(photos, prompt),
+      this.callGroqWithRetry(photos, prompt),
     ]);
 
     const validatedOutput = AISkinAnalysisValidator.validate(rawAiOutput);
@@ -109,11 +88,17 @@ export class AISkinAnalysisService {
     if (validatedOutput.status === 'REJECTED') {
       logger.info(`[AISkinAnalysisService] Rejected for ${userId}: ${validatedOutput.rejectionReason}`);
       return await SkinAnalysis.create({
-        userId, images: uploadedImages, imageHash, status: 'rejected',
+        userId,
+        images: uploadedImages,
+        imageHash,
+        status: 'rejected',
         rejectionReason: validatedOutput.rejectionReason,
         rejectionMessage: validatedOutput.rejectionMessage,
-        analysisVersion: ENV.AI_ANALYSIS_VERSION, promptVersion: PROMPT_VERSION,
-        model: ENV.GEMINI_MODEL, processingTime: Date.now() - startTime, metadata: profileContext,
+        analysisVersion: ENV.AI_ANALYSIS_VERSION,
+        promptVersion: PROMPT_VERSION,
+        model: ENV.GROQ_MODEL,
+        processingTime: Date.now() - startTime,
+        metadata: profileContext,
       });
     }
 
@@ -126,21 +111,30 @@ export class AISkinAnalysisService {
     const processingTime = Date.now() - startTime;
 
     const analysisRecord = await SkinAnalysis.create({
-      userId, images: uploadedImages, imageHash, status: 'completed',
-      analysisVersion: ENV.AI_ANALYSIS_VERSION, promptVersion: PROMPT_VERSION,
-      model: ENV.GEMINI_MODEL,
-      skinType: validatedOutput.skinType, concerns: validatedOutput.concerns,
+      userId,
+      images: uploadedImages,
+      imageHash,
+      status: 'completed',
+      analysisVersion: ENV.AI_ANALYSIS_VERSION,
+      promptVersion: PROMPT_VERSION,
+      model: ENV.GROQ_MODEL,
+      skinType: validatedOutput.skinType,
+      concerns: validatedOutput.concerns,
       observations: validatedOutput.observations,
-      glowScore: scoreResult.glowScore, potentialScore: scoreResult.potentialScore,
-      aiSummary: validatedOutput.summary, processingTime, metadata: profileContext,
+      recommendations: validatedOutput.recommendations || [],
+      glowScore: scoreResult.glowScore,
+      potentialScore: scoreResult.potentialScore,
+      aiSummary: validatedOutput.summary,
+      processingTime,
+      metadata: profileContext,
     });
 
     logger.info(`[AISkinAnalysisService] Done for ${userId} in ${processingTime}ms — Glow: ${scoreResult.glowScore}`);
     return analysisRecord;
   }
 
-  private static async callGeminiWithRetry(photos: IUploadedPhotoInput[], prompt: string): Promise<any> {
-    const maxRetries = Math.max(0, Math.min(1, ENV.GEMINI_MAX_RETRIES));
+  static async callGroqWithRetry(photos: IUploadedPhotoInput[], prompt: string): Promise<any> {
+    const maxRetries = Math.max(0, Math.min(2, ENV.GROQ_MAX_RETRIES));
     let lastError: any = null;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -149,7 +143,7 @@ export class AISkinAnalysisService {
           logger.info(`[AISkinAnalysisService] Retry attempt ${attempt}...`);
           await new Promise((resolve) => setTimeout(resolve, 1500));
         }
-        return await this.callGeminiSingleAttempt(photos, prompt);
+        return await this.callGroqSingleAttempt(photos, prompt);
       } catch (err: any) {
         lastError = err;
 
@@ -172,9 +166,9 @@ export class AISkinAnalysisService {
     throw ApiError.aiProviderError('AI provider is unavailable, please try again');
   }
 
-  private static async callGeminiSingleAttempt(photos: IUploadedPhotoInput[], prompt: string): Promise<any> {
+  static async callGroqSingleAttempt(photos: IUploadedPhotoInput[], prompt: string): Promise<any> {
     const client = this.getClient();
-    const timeoutMs = ENV.GEMINI_TIMEOUT_MS;
+    const timeoutMs = ENV.GROQ_TIMEOUT_MS;
     const abortController = new AbortController();
     const timer = setTimeout(() => {
       logger.warn(`[AISkinAnalysisService] AbortSignal fired after ${timeoutMs}ms`);
@@ -184,44 +178,53 @@ export class AISkinAnalysisService {
     const requestStart = Date.now();
 
     try {
-      const parts: any[] = [createPartFromText(prompt)];
+      const contentParts: any[] = [{ type: 'text', text: prompt }];
 
       for (const photo of photos) {
-        const sizeMB = (photo.buffer.length / (1024 * 1024)).toFixed(2);
-        if (photo.buffer.length > INLINE_SIZE_THRESHOLD_BYTES) {
-          logger.info(`[AISkinAnalysisService] ${photo.angle}: ${sizeMB}MB -> Files API`);
-          const { uri, mimeType } = await this.uploadToGeminiFilesAPI(photo);
-          parts.push(createPartFromUri(uri, mimeType));
-        } else {
-          logger.info(`[AISkinAnalysisService] ${photo.angle}: ${sizeMB}MB -> inline base64`);
-          parts.push(createPartFromBase64(photo.buffer.toString('base64'), photo.mimetype));
-        }
+        contentParts.push({
+          type: 'image_url',
+          image_url: {
+            url: `data:${photo.mimetype};base64,${photo.buffer.toString('base64')}`,
+          },
+        });
       }
 
-      logger.info(`[AISkinAnalysisService] Calling Gemini ${ENV.GEMINI_MODEL} (timeout: ${timeoutMs}ms)`);
+      logger.info(`[AISkinAnalysisService] Calling Groq ${ENV.GROQ_MODEL} (timeout: ${timeoutMs}ms)`);
 
-      const response = await client.models.generateContent({
-        model: ENV.GEMINI_MODEL,
-        contents: parts,
-        config: {
-          responseMimeType: 'application/json',
-          responseSchema: geminiSkinAnalysisSchema,
-          abortSignal: abortController.signal,
-          httpOptions: { timeout: timeoutMs },
+      const completion = await client.chat.completions.create(
+        {
+          model: ENV.GROQ_MODEL,
+          messages: [
+            {
+              role: 'user',
+              content: contentParts,
+            },
+          ],
+          response_format: { type: 'json_object' },
+          temperature: 0.1,
         },
-      });
+        {
+          signal: abortController.signal,
+          timeout: timeoutMs,
+        }
+      );
 
       clearTimeout(timer);
-      logger.info(`[AISkinAnalysisService] Gemini responded in ${Date.now() - requestStart}ms`);
+      logger.info(`[AISkinAnalysisService] Groq responded in ${Date.now() - requestStart}ms`);
 
-      const responseText = response?.text;
-      if (!responseText) throw ApiError.aiResponseInvalid('Empty response from Gemini');
+      const responseText = completion?.choices?.[0]?.message?.content;
+      if (!responseText) throw ApiError.aiResponseInvalid('Empty response from Groq');
+
+      let cleaned = responseText.trim();
+      if (cleaned.startsWith('```')) {
+        cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+      }
 
       try {
-        return JSON.parse(responseText);
+        return JSON.parse(cleaned);
       } catch {
         logger.error('[AISkinAnalysisService] JSON parse failed', { preview: responseText?.substring(0, 300) });
-        throw ApiError.aiResponseInvalid('Gemini returned non-JSON output');
+        throw ApiError.aiResponseInvalid('Groq returned non-JSON output');
       }
     } catch (err: any) {
       clearTimeout(timer);
@@ -249,6 +252,13 @@ export class AISkinAnalysisService {
       throw err;
     }
   }
+
+  // Backwards compatibility aliases
+  static callGeminiSingleAttempt = (photos: IUploadedPhotoInput[], prompt: string) =>
+    AISkinAnalysisService.callGroqSingleAttempt(photos, prompt);
+
+  static callGeminiWithRetry = (photos: IUploadedPhotoInput[], prompt: string) =>
+    AISkinAnalysisService.callGroqWithRetry(photos, prompt);
 
   static async getAnalysisById(userId: string, analysisId: string): Promise<ISkinAnalysisDocument> {
     const analysis = await SkinAnalysis.findById(analysisId);

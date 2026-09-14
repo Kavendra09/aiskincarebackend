@@ -20,6 +20,7 @@ const CONCERN_WEIGHTS: Record<AISkinConcernType, number> = {
   blackheads: 0.8,
   whiteheads: 0.8,
   uneven_skin_tone: 0.9,
+  uneven_texture: 0.9,
   dull_skin: 0.8,
   wrinkles: 0.8,
   fine_lines: 0.7,
